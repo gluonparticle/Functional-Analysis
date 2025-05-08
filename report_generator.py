@@ -16,11 +16,13 @@ HTML_TEMPLATE = """
         h2 {{ color: #4CAF50; margin-top: 30px; }}
         .experiment-params {{ background-color: #e9e9e9; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
         .experiment-params p {{ margin: 5px 0; }}
-        .grid-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; }}
+        .features-list {{ list-style-type: none; padding-left: 0; columns: 2; -webkit-columns: 2; -moz-columns: 2;}}
+        .features-list li {{ background-color: #f0f0f0; margin: 2px; padding: 3px 6px; border-radius: 3px; display: inline-block; }}
+        .grid-container {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap: 20px; }}
         .model-card {{ border: 1px solid #ddd; border-radius: 5px; padding: 15px; background-color: #f9f9f9; }}
         .model-card h3 {{ margin-top: 0; color: #555; }}
         .metrics-table {{ width: 100%; border-collapse: collapse; margin-bottom: 15px; }}
-        .metrics-table th, .metrics-table td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        .metrics-table th, .metrics-table td {{ border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 0.9em; }}
         .metrics-table th {{ background-color: #e9e9e9; }}
         .plot-image {{ max-width: 100%; height: auto; border: 1px solid #ccc; margin-top: 10px; }}
         footer {{ text-align: center; margin-top: 30px; font-size: 0.9em; color: #777; }}
@@ -35,6 +37,10 @@ HTML_TEMPLATE = """
             <p><strong>Dataset Size (Train Fraction):</strong> {train_data_fraction_param}</p>
             <p><strong>MLP Epochs:</strong> {epochs_param}</p>
             <p><strong>MLP Activation:</strong> {activation_param}</p>
+            <p><strong>Features Used in Models:</strong></p>
+            <ul class="features-list">
+                {selected_features_list_html}
+            </ul>
         </div>
 
         <div class="grid-container">
@@ -63,42 +69,48 @@ MODEL_CARD_TEMPLATE = """
 </div>
 """
 
-def generate_html_report(all_model_results, train_data_fraction, epochs, activation, output_dir="reports"):
+def generate_html_report(all_model_results, train_data_fraction, epochs, activation, 
+                         selected_features_for_report, output_dir="reports", 
+                         output_filename_override=None):
     """
     Generates an HTML report from the collected model results.
-
-    Args:
-        all_model_results (list): A list of dictionaries, where each dict is the result from a model.
-        train_data_fraction (float): The fraction of training data used.
-        epochs (int): Number of epochs used for MLP.
-        activation (str): Activation function used for MLP.
-        output_dir (str): Directory to save the report.
+    Returns the full path to the generated report.
     """
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    filename = f"analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    
+    if output_filename_override:
+        # Ensure it's just a filename, not a path, and place it in output_dir
+        filename = os.path.basename(output_filename_override)
+    else:
+        filename = f"analysis_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
+    
     filepath = os.path.join(output_dir, filename)
 
     model_cards_html = ""
     for model_result in all_model_results:
-        if not model_result:  # Skip if a model failed or returned None
+        if not model_result: 
             continue
-
+        
+        error_message = model_result.get("error")
         metrics_rows_html = ""
-        for metric, value in model_result.get("metrics", {}).items():
-            metrics_rows_html += f"<tr><td>{metric}</td><td>{value}</td></tr>\n"
+        if error_message:
+            metrics_rows_html = f"<tr><td colspan='2' style='color:red;'>Error: {error_message}</td></tr>"
+        else:
+            for metric, value in model_result.get("metrics", {}).items():
+                metrics_rows_html += f"<tr><td>{metric}</td><td>{value}</td></tr>\n"
 
         plots_html = ""
-        for plot_name, base64_img in model_result.get("plots", {}).items():
-            if base64_img:
-                plot_title = plot_name.replace("_", " ").title()
-                plots_html += f"<div><p><strong>{plot_title}:</strong></p><img src='data:image/png;base64,{base64_img}' alt='{plot_title}' class='plot-image'></div>\n"
-            else:
-                plots_html += f"<div><p><strong>{plot_name.replace('_', ' ').title()}:</strong> Plot not available.</p></div>\n"
-
-
+        if not error_message: # Only show plots if no error
+            for plot_name, base64_img in model_result.get("plots", {}).items():
+                if base64_img:
+                    plot_title = plot_name.replace("_", " ").title()
+                    plots_html += f"<div><p><strong>{plot_title}:</strong></p><img src='data:image/png;base64,{base64_img}' alt='{plot_title}' class='plot-image'></div>\n"
+                else:
+                    plots_html += f"<div><p><strong>{plot_name.replace('_', ' ').title()}:</strong> Plot not available.</p></div>\n"
+        
         model_cards_html += MODEL_CARD_TEMPLATE.format(
             model_name=model_result.get("model_name", "Unknown Model"),
             task_type=model_result.get("task_type", "N/A"),
@@ -106,36 +118,31 @@ def generate_html_report(all_model_results, train_data_fraction, epochs, activat
             plots_html=plots_html
         )
 
+    selected_features_list_html = ""
+    if selected_features_for_report:
+        for feature_name in selected_features_for_report:
+            selected_features_list_html += f"<li>{feature_name}</li>\n"
+    else:
+        selected_features_list_html = "<li>None selected or error.</li>"
+
     full_html = HTML_TEMPLATE.format(
         report_time=report_time,
-        train_data_fraction_param=f"{train_data_fraction*100:.0f}% of {50000} samples", # Referring to TRAIN_BASE_SIZE
+        train_data_fraction_param=f"{train_data_fraction*100:.0f}% of {50000} base samples", # Assuming TRAIN_BASE_SIZE is 50000
         epochs_param=epochs,
         activation_param=activation,
+        selected_features_list_html=selected_features_list_html,
         model_cards_html=model_cards_html
     )
 
     try:
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(full_html)
-        print(f"\nHTML report generated: {os.path.abspath(filepath)}")
+        abs_filepath = os.path.abspath(filepath)
+        print(f"\nHTML report generated: {abs_filepath}")
+        return abs_filepath # Return the path
     except IOError as e:
         print(f"Error writing HTML report: {e}")
+        return None
 
 if __name__ == '__main__':
     print("Report generator module loaded.")
-    # Example usage (for testing this module standalone - won't produce real plots without model results)
-    # dummy_results = [
-    #     {
-    #         "model_name": "Dummy Model 1 (classification)",
-    #         "task_type": "classification",
-    #         "metrics": {"Accuracy": "0.95", "Loss": "0.123"},
-    #         "plots": {"confusion_matrix": "base64_string_placeholder_cm", "loss_curve": None}
-    #     },
-    #     {
-    #         "model_name": "Dummy Model 2 (regression)",
-    #         "task_type": "regression",
-    #         "metrics": {"RMSE": "10.5", "R2": "0.88"},
-    #         "plots": {"true_vs_predicted": "base64_string_placeholder_reg"}
-    #     }
-    # ]
-    # generate_html_report(dummy_results, train_data_fraction=0.8, epochs=50, activation="relu")

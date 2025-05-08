@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Functional Analysis Configurator</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; background-color: #f4f4f9; color: #333; }
+        .container { max-width: 950px; margin: auto; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1, h2 { color: #2c3e50; }
+        h1 { border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 25px; }
+        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
+        th { background-color: #ecf0f1; color: #2c3e50; }
+        .form-section { margin-bottom: 20px; padding: 15px; border: 1px solid #e0e0e0; border-radius: 5px; background-color: #f9f9f9;}
+        .form-section label { display: block; margin-bottom: 8px; font-weight: bold; color: #34495e; }
+        select, input[type="number"], input[type="text"] {
+            width: calc(100% - 22px); padding: 10px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;
+        }
+        .param-selection-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-bottom:10px;}
+        .param-selection-group label { font-weight: normal; display: flex; align-items: center; background-color: #e9ecef; padding: 8px; border-radius: 4px; cursor: pointer;}
+        .param-selection-group input[type="checkbox"] { margin-right: 8px; width:auto;}
+        .button-container { text-align: center; margin-top: 20px; }
+        .action-button { /* Common style for buttons */
+            background-color: #3498db; color: white; padding: 12px 20px; border: none; cursor: pointer;
+            font-size: 16px; border-radius: 5px; transition: background-color 0.3s ease; margin: 5px;
+        }
+        .action-button:hover { background-color: #2980b9; }
+        #runAnalysisButton.running { background-color: #f39c12; cursor: not-allowed; }
+        
+        #statusArea { margin-top: 20px; padding: 10px; background-color: #e9ecef; border-radius: 5px; text-align: center; }
+        #loadingIndicator { display: none; font-weight: bold; }
+        #resultsLinkArea { display: none; margin-top: 10px;}
+
+        /* Styles for report content if you were to embed it (not used if opening in new tab) */
+        /* #reportDisplayArea { margin-top: 20px; padding: 10px; border: 1px dashed #ccc; display: none; } */
+        /* #reportDisplayArea iframe { width: 100%; height: 600px; border:1px solid #ccc; } */
+        .info-text { font-size: 0.9em; color: #7f8c8d; margin-bottom: 15px;}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Functional Analysis Configuration</h1>
+
+        <h2>Parameter Transformation Information</h2>
+        <p class="info-text">Below is a description of each raw parameter, its transformation, and its general nature.</p>
+        <table id="paramInfoTable">
+            <thead>
+                <tr>
+                    <th>Raw Param (Input)</th>
+                    <th>Transformed Feature Name (Used by Model)</th>
+                    <th>General Nature / Description of Transform</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Rows will be populated by JavaScript -->
+            </tbody>
+        </table>
+
+        <h2>Configure Your Analysis Run</h2>
+        
+        <form id="analysisForm">
+            <div class="form-section">
+                <label>Select Parameters to Use:</label>
+                <p class="info-text">Check the raw parameters (p1-p15) whose transformed versions you want to include in the model training.</p>
+                <div id="parameterCheckboxes" class="param-selection-group">
+                    <!-- Checkboxes will be populated by JavaScript -->
+                </div>
+                <div>
+                    <button type="button" onclick="selectAllParams(true)" class="action-button" style="background-color:#7f8c8d;">Select All</button>
+                    <button type="button" onclick="selectAllParams(false)" class="action-button" style="background-color:#7f8c8d;">Deselect All</button>
+                    <button type="button" onclick="selectDefaultParams()" class="action-button" style="background-color:#7f8c8d;">Select Default (All but Fully Noisy)</button>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <label for="trainFraction">Training Data Fraction (0.01 to 1.0):</label>
+                <input type="number" id="trainFraction" name="trainFraction" min="0.01" max="1.0" step="0.01" value="1.0">
+            </div>
+
+            <div class="form-section">
+                <label for="mlpEpochs">MLP Epochs:</label>
+                <input type="number" id="mlpEpochs" name="mlpEpochs" min="1" value="100">
+            </div>
+
+            <div class="form-section">
+                <label for="mlpActivation">MLP Activation Function:</label>
+                <select id="mlpActivation" name="mlpActivation">
+                    <!-- Options will be populated by JavaScript -->
+                </select>
+            </div>
+
+            <div class="button-container">
+                <button type="submit" id="runAnalysisButton" class="action-button">▶ Run Analysis</button>
+            </div>
+        </form>
+        
+        <div id="statusArea">
+             <p id="statusMessage">Submit the form to start analysis.</p>
+             <div id="loadingIndicator">Running analysis, please wait... This may take several minutes.</div>
+             <div id="resultsLinkArea">
+                <button id="viewReportButton" class="action-button" style="background-color: #2ecc71;">View Report</button>
+             </div>
+        </div>
+    </div>
+
+    <script>
+        // This data should ideally match what's in your dataset_generator.py
+        const TRANSFORMED_FEATURE_MAPPING_JS = {
+            'p1': { name: 'T1_power_noisy', nature: 'Signal with noise' },
+            'p2': { name: 'T2_linear_high_noise', nature: 'Signal with high noise' },
+            'p3': { name: 'T3_trig_complex', nature: 'Complex signal' },
+            'p4': { name: 'T4_interaction_A', nature: 'Interaction (p4, p5)' },
+            'p5': { name: 'T5_exponential_var', nature: 'Signal with noise (also used in T4)' },
+            'p6': { name: 'T6_FULLY_NOISY_A', nature: 'FULLY NOISY (Decoy)' },
+            'p7': { name: 'T7_cubic_strong_signal', nature: 'Strong signal' },
+            'p8': { name: 'T8_log_mixed_noise', nature: 'Logarithmic signal with noise' },
+            'p9': { name: 'T9_polynomial_signal', nature: 'Polynomial signal' },
+            'p10': { name: 'T10_periodic_subtle', nature: 'Subtle periodic signal' },
+            'p11': { name: 'T11_interaction_B', nature: 'Interaction (p11, p12)' },
+            'p12': { name: 'T12_ratio_unstable', nature: 'Ratio, can be unstable' },
+            'p13': { name: 'T13_FULLY_NOISY_B', nature: 'FULLY NOISY (Decoy)' },
+            'p14': { name: 'T14_conditional_logic', nature: 'Conditional logic based' },
+            'p15': { name: 'T15_FULLY_NOISY_C', nature: 'FULLY NOISY (Decoy)' }
+        };
+        const RAW_PARAMETER_NAMES_JS = Object.keys(TRANSFORMED_FEATURE_MAPPING_JS);
+
+        const MLP_ACTIVATION_OPTIONS_JS = [
+            { value: "relu", text: "Relu" },
+            { value: "tanh", text: "Tanh" },
+            { value: "logistic", text: "Logistic (Sigmoid)" },
+            { value: "signum", text: "Signum (Custom/Mapped)" },
+            { value: "leaky_relu", text: "Leaky Relu (Custom/Mapped)" },
+            { value: "softmax", text: "Softmax (Custom/Mapped)" }
+        ];
+        const DEFAULT_MLP_ACTIVATION_JS = "relu";
+
+        // Populate Parameter Info Table & Checkboxes
+        const paramInfoTableBody = document.getElementById('paramInfoTable').getElementsByTagName('tbody')[0];
+        const paramCheckboxesDiv = document.getElementById('parameterCheckboxes');
+
+        RAW_PARAMETER_NAMES_JS.forEach(pRaw => {
+            const feature = TRANSFORMED_FEATURE_MAPPING_JS[pRaw];
+            // Table Row
+            const row = paramInfoTableBody.insertRow();
+            row.insertCell().textContent = pRaw;
+            row.insertCell().textContent = feature.name;
+            row.insertCell().textContent = feature.nature;
+
+            // Checkbox
+            const checkboxId = `param_${pRaw}`;
+            const label = document.createElement('label');
+            label.htmlFor = checkboxId;
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = checkboxId;
+            checkbox.name = 'parameters';
+            checkbox.value = pRaw;
+            if (!feature.nature.includes("FULLY NOISY")) {
+                checkbox.checked = true; // Default check non-noisy
+            }
+            label.appendChild(checkbox);
+            label.appendChild(document.createTextNode(`${pRaw} (${feature.name})`));
+            paramCheckboxesDiv.appendChild(label);
+        });
+        
+        function selectAllParams(checkedState) {
+            document.querySelectorAll('#parameterCheckboxes input[type="checkbox"]').forEach(cb => cb.checked = checkedState);
+        }
+        function selectDefaultParams() {
+            document.querySelectorAll('#parameterCheckboxes input[type="checkbox"]').forEach(cb => {
+                const pRaw = cb.value;
+                const feature = TRANSFORMED_FEATURE_MAPPING_JS[pRaw];
+                cb.checked = !feature.nature.includes("FULLY NOISY");
+            });
+        }
+
+        const mlpActivationSelect = document.getElementById('mlpActivation');
+        MLP_ACTIVATION_OPTIONS_JS.forEach(opt => {
+            const option = new Option(opt.text, opt.value);
+            if (opt.value === DEFAULT_MLP_ACTIVATION_JS) option.selected = true;
+            mlpActivationSelect.add(option);
+        });
+
+        // --- Form Submission and Status Handling ---
+        const analysisForm = document.getElementById('analysisForm');
+        const runAnalysisButton = document.getElementById('runAnalysisButton');
+        const statusMessage = document.getElementById('statusMessage');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const resultsLinkArea = document.getElementById('resultsLinkArea');
+        const viewReportButton = document.getElementById('viewReportButton');
+        let currentJobId = null;
+
+        analysisForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            runAnalysisButton.disabled = true;
+            runAnalysisButton.classList.add('running');
+            runAnalysisButton.textContent = 'Running...';
+            statusMessage.textContent = 'Submitting analysis job...';
+            loadingIndicator.style.display = 'inline'; // Show spinner or text
+            resultsLinkArea.style.display = 'none';
+
+            const formData = new FormData(this);
+            // Ensure 'parameters' field has at least one value if none selected, or handle in backend
+            // For simplicity, let's assume user selects at least one or backend handles empty.
+            // If no checkboxes are selected, formData.getAll('parameters') will be empty.
+            // The backend app.py has logic to default to 'all_but_noisy' if needed.
+
+            fetch('/run_analysis', { method: 'POST', body: formData })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success' && data.job_id) {
+                    currentJobId = data.job_id;
+                    statusMessage.textContent = `Analysis job ${currentJobId} started. Checking status...`;
+                    checkJobStatus(currentJobId);
+                } else {
+                    throw new Error(data.message || 'Failed to start analysis job.');
+                }
+            })
+            .catch(error => {
+                statusMessage.textContent = `Error: ${error.message}`;
+                loadingIndicator.style.display = 'none';
+                runAnalysisButton.disabled = false;
+                runAnalysisButton.classList.remove('running');
+                runAnalysisButton.textContent = '► Run Analysis';
+            });
+        });
+
+        function checkJobStatus(jobId) {
+            fetch(`/job_status/${jobId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'completed') {
+                    statusMessage.textContent = `Job ${jobId} completed!`;
+                    loadingIndicator.style.display = 'none';
+                    resultsLinkArea.style.display = 'block';
+                    viewReportButton.onclick = () => {
+                        // Open the report content URL in a new tab
+                        window.open(data.report_content_url, '_blank');
+                    };
+                    runAnalysisButton.disabled = false;
+                    runAnalysisButton.classList.remove('running');
+                    runAnalysisButton.textContent = '► Run Analysis';
+                } else if (data.status === 'failed') {
+                    statusMessage.textContent = `Job ${jobId} failed: ${data.error_message || 'Unknown error'}`;
+                    loadingIndicator.style.display = 'none';
+                    runAnalysisButton.disabled = false;
+                    runAnalysisButton.classList.remove('running');
+                    runAnalysisButton.textContent = '► Run Analysis';
+                } else if (data.status === 'running' || data.status === 'pending') {
+                    statusMessage.textContent = `Job ${jobId} is ${data.status}. Auto-refreshing...`;
+                    setTimeout(() => checkJobStatus(jobId), 3000); // Poll every 3 seconds
+                } else {
+                    statusMessage.textContent = `Job ${jobId} status: ${data.status}.`;
+                    loadingIndicator.style.display = 'none';
+                    runAnalysisButton.disabled = false;
+                    runAnalysisButton.classList.remove('running');
+                    runAnalysisButton.textContent = '► Run Analysis';
+                }
+            })
+            .catch(error => {
+                statusMessage.textContent = `Error checking job status: ${error.message}`;
+                loadingIndicator.style.display = 'none';
+                // Don't re-enable run button here, might be a temporary network issue
+                // Or add more sophisticated retry / error display
+                setTimeout(() => checkJobStatus(jobId), 5000); // Retry after longer delay
+            });
+        }
+    </script>
+</body>
+</html>
